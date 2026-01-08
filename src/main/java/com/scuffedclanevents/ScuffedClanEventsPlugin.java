@@ -99,7 +99,7 @@ public class ScuffedClanEventsPlugin extends Plugin {
 	 * Fetch data from Google Sheets API
 	 */
 	private void fetchGoogleSheetData(String sheetId, String apiKey) throws IOException {
-		String range = "TheHunt!A53:C62";
+		String range = "TheHunt!A53:C65";
 		String url = "https://sheets.googleapis.com/v4/spreadsheets/" +
 				sheetId +
 				"/values/" +
@@ -119,7 +119,6 @@ public class ScuffedClanEventsPlugin extends Plugin {
 			}
 			scanner.close();
 
-			log.debug("Sheet data loaded: " + response.toString());
 			parseAndDisplaySheetData(response.toString());
 		} catch (Exception e) {
 			log.error("Error fetching sheet data: " + e.getMessage(), e);
@@ -135,6 +134,8 @@ public class ScuffedClanEventsPlugin extends Plugin {
 			JSONArray values = json.getJSONArray("values");
 
 			cachedEvents.clear();
+			String linkUrl1 = "";
+			String linkUrl2 = "";
 
 			// Skip header row (index 0)
 			for (int i = 1; i < values.length(); i++) {
@@ -146,6 +147,18 @@ public class ScuffedClanEventsPlugin extends Plugin {
 				String b = row.optString(1, "").trim();
 				String c = row.optString(2, "").trim();
 
+				// Extract links from rows 11 and 12 (A64 and A65)
+				if (i == 11) {
+					linkUrl1 = a;
+				} else if (i == 12) {
+					linkUrl2 = a;
+				}
+
+				// Only add event entries for rows 1-9 (A53-A61 data)
+				if (i >= 10) {
+					continue;
+				}
+
 				if (a.isEmpty() && b.isEmpty() && c.isEmpty()) {
 					continue;
 				}
@@ -156,16 +169,21 @@ public class ScuffedClanEventsPlugin extends Plugin {
 			Winner[] winners = new Winner[9];
 			List<ScuffedClanEventsPanel.TileData> tiles = buildBingoTiles(winners);
 			ScoreResult scores = computeScores(winners);
+			List<ScuffedClanEventsPanel.HighscoreRow> highscores = buildHighscores(winners);
 
 			if (panel != null) {
+				String finalLinkUrl1 = linkUrl1;
+				String finalLinkUrl2 = linkUrl2;
 				SwingUtilities.invokeLater(() -> {
 					panel.setTiles(tiles);
 					panel.setTeamAPlaceholder("Red Team points: " + scores.teamA);
 					panel.setTeamBPlaceholder("Blue Team points: " + scores.teamB);
+					panel.setLastUpdated("Last updated: " + java.time.LocalDateTime.now().format(
+							java.time.format.DateTimeFormatter.ofPattern("MM/dd/yyyy HH:mm")));
+					panel.setLinkUrls(finalLinkUrl1, finalLinkUrl2);
+					panel.setHighscores(highscores);
 				});
 			}
-			log.debug("Panel updated with bingo board, rows=" + cachedEvents.size() + " scores A=" + scores.teamA
-					+ " B=" + scores.teamB);
 		} catch (Exception e) {
 			log.error("Error parsing sheet data: " + e.getMessage(), e);
 		}
@@ -187,6 +205,61 @@ public class ScuffedClanEventsPlugin extends Plugin {
 			tiles.add(new ScuffedClanEventsPanel.TileData(emptyToPlaceholder(e.a), color));
 		}
 		return tiles;
+	}
+
+	private List<ScuffedClanEventsPanel.HighscoreRow> buildHighscores(Winner[] winners) {
+		List<ScuffedClanEventsPanel.HighscoreRow> rows = new ArrayList<>(9);
+		for (int i = 0; i < 9; i++) {
+			EventEntry e = (i < cachedEvents.size()) ? cachedEvents.get(i) : null;
+			if (e == null) {
+				rows.add(new ScuffedClanEventsPanel.HighscoreRow("(empty)", "-", Color.LIGHT_GRAY));
+				continue;
+			}
+
+			Winner w = winners[i];
+			String title = emptyToPlaceholder(e.a);
+			String bestValue;
+			Color color;
+
+			boolean isTimeA = isTimeFormat(e.b);
+			boolean isTimeB = isTimeFormat(e.c);
+			if (isTimeA && isTimeB) {
+				double t1 = parseTimeSeconds(e.b);
+				double t2 = parseTimeSeconds(e.c);
+				if (Double.isNaN(t1) || Double.isNaN(t2)) {
+					bestValue = "-";
+					color = TIE_COLOR;
+				} else if (t1 == t2) {
+					bestValue = e.b;
+					color = TIE_COLOR;
+				} else if (t1 < t2) {
+					bestValue = e.b;
+					color = TEAM_A_COLOR;
+				} else {
+					bestValue = e.c;
+					color = TEAM_B_COLOR;
+				}
+			} else {
+				double s1 = parseScore(e.b);
+				double s2 = parseScore(e.c);
+				if (Double.isNaN(s1) && Double.isNaN(s2)) {
+					bestValue = "-";
+					color = TIE_COLOR;
+				} else if (Double.isNaN(s2) || s1 > s2) {
+					bestValue = e.b.isEmpty() ? String.valueOf(s1) : e.b;
+					color = TEAM_A_COLOR;
+				} else if (Double.isNaN(s1) || s2 > s1) {
+					bestValue = e.c.isEmpty() ? String.valueOf(s2) : e.c;
+					color = TEAM_B_COLOR;
+				} else {
+					bestValue = e.b.isEmpty() ? e.c : e.b;
+					color = TIE_COLOR;
+				}
+			}
+
+			rows.add(new ScuffedClanEventsPanel.HighscoreRow(title, bestValue, color));
+		}
+		return rows;
 	}
 
 	private Winner determineWinner(EventEntry e) {
