@@ -3,8 +3,6 @@ package com.scuffedclanevents;
 import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
-import net.runelite.api.ChatMessageType;
-import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.config.ConfigManager;
@@ -30,9 +28,6 @@ import javax.swing.SwingUtilities;
 @Slf4j
 @PluginDescriptor(name = "Scuffed Clan Events")
 public class ScuffedClanEventsPlugin extends Plugin {
-	@Inject
-	private Client client;
-
 	@Inject
 	private ScuffedClanEventsConfig config;
 
@@ -99,7 +94,7 @@ public class ScuffedClanEventsPlugin extends Plugin {
 	 * Fetch data from Google Sheets API
 	 */
 	private void fetchGoogleSheetData(String sheetId, String apiKey) throws IOException {
-		String range = "TheHunt!A53:C65";
+		String range = "punch26q1!A1:F13";
 		String url = "https://sheets.googleapis.com/v4/spreadsheets/" +
 				sheetId +
 				"/values/" +
@@ -147,14 +142,14 @@ public class ScuffedClanEventsPlugin extends Plugin {
 				String b = row.optString(1, "").trim();
 				String c = row.optString(2, "").trim();
 
-				// Extract links from rows 11 and 12 (A64 and A65)
-				if (i == 11) {
+				// Extract links from rows 11 and 12 (A12 and A13)
+				if (i == 12) {
 					linkUrl1 = a;
-				} else if (i == 12) {
+				} else if (i == 13) {
 					linkUrl2 = a;
 				}
 
-				// Only add event entries for rows 1-9 (A53-A61 data)
+				// Only add event entries for rows 1-9 (A2-A10 data)
 				if (i >= 10) {
 					continue;
 				}
@@ -166,18 +161,45 @@ public class ScuffedClanEventsPlugin extends Plugin {
 				cachedEvents.add(new EventEntry(a, b, c));
 			}
 
+			// Read red and blue team totals from F2 and F3 (row 1 and 2, col 5, 0-based)
+			int redTeamTotal = 0;
+			int blueTeamTotal = 0;
+			if (values.length() > 1) {
+				JSONArray row1 = values.optJSONArray(1); // F2 is row 2 (index 1)
+				if (row1 != null && row1.length() > 5) {
+					String redStr = row1.optString(5, "0").trim();
+					try {
+						redTeamTotal = Integer.parseInt(redStr);
+					} catch (NumberFormatException e) {
+						redTeamTotal = 0;
+					}
+				}
+			}
+			if (values.length() > 2) {
+				JSONArray row2 = values.optJSONArray(2); // F3 is row 3 (index 2)
+				if (row2 != null && row2.length() > 5) {
+					String blueStr = row2.optString(5, "0").trim();
+					try {
+						blueTeamTotal = Integer.parseInt(blueStr);
+					} catch (NumberFormatException e) {
+						blueTeamTotal = 0;
+					}
+				}
+			}
+
 			Winner[] winners = new Winner[9];
 			List<ScuffedClanEventsPanel.TileData> tiles = buildBingoTiles(winners);
-			ScoreResult scores = computeScores(winners);
 			List<ScuffedClanEventsPanel.HighscoreRow> highscores = buildHighscores(winners);
 
 			if (panel != null) {
 				String finalLinkUrl1 = linkUrl1;
 				String finalLinkUrl2 = linkUrl2;
+				int finalRed = redTeamTotal;
+				int finalBlue = blueTeamTotal;
 				SwingUtilities.invokeLater(() -> {
 					panel.setTiles(tiles);
-					panel.setTeamAPlaceholder("Red Team points: " + scores.teamA);
-					panel.setTeamBPlaceholder("Blue Team points: " + scores.teamB);
+					panel.setTeamAPlaceholder("Red Team points: " + finalRed);
+					panel.setTeamBPlaceholder("Blue Team points: " + finalBlue);
 					panel.setLastUpdated("Last updated: " + java.time.LocalDateTime.now().format(
 							java.time.format.DateTimeFormatter.ofPattern("MM/dd/yyyy HH:mm")));
 					panel.setLinkUrls(finalLinkUrl1, finalLinkUrl2);
